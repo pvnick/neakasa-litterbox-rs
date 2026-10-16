@@ -11,3 +11,6 @@ app-user.json
 *.key
 *.p12
 *.pfx
+.venv-bench/
+__pycache__/
+*.pyc

@@ -19,15 +19,59 @@ safety. When the next litter-box event arrives, we intend to be ready. The cat
 has declined to participate in sprint planning.
 
 The practical benefits are a standalone executable with no Python runtime and
-an asynchronous Rust library for integration into Rust applications. There are
-no comparative performance benchmarks or hard real-time guarantees here; cloud
-and network latency still apply. The original Python SDK did the protocol work
-that makes this port possible.
+an asynchronous Rust library for integration into Rust applications. The
+[benchmarks below](#benchmarks) measure local overhead; they do not provide hard
+real-time guarantees, and cloud/network latency still apply. The original Python
+SDK did the protocol work that makes this port possible.
 
 The library and executable use Rust HTTP, cryptography, JSON, and MQTT
 implementations. Python is not needed to build or run them. The optional
 `--import-session` command requires `adb` and the already-running Android
 environment; ordinary commands use the existing host-side state.
+
+## Benchmarks
+
+Measured on **October 16, 2026**, on an **Apple M1 performance core**, Linux
+`aarch64`, with both implementations pinned to CPU 4. Rust **1.99.1**, default
+release profile (no custom `RUSTFLAGS`); CPython **3.14.8**, Python SDK **0.2.2**
+at fork commit `4be4fc7`, and `cryptography` **50.0.2**. The CPU used its existing
+`schedutil` governor; frequency was not fixed.
+
+Values are **median [25th–75th percentile]**. The ratio is Python/Rust:
+higher means lower Rust elapsed time or resident memory for this workload.
+
+| Workload | Python | Rust | Python/Rust median |
+| --- | ---: | ---: | ---: |
+| CLI startup (`--help`) | 203.586 [198.811–207.122] ms | 1.176 [1.068–2.344] ms | 173.08× |
+| CLI peak resident memory (`--help`) | 52.359 [51.914–52.375] MiB | 3.578 [3.562–3.594] MiB | 14.63× |
+| Session-token encryption | 3.774 [3.742–3.804] µs/op | 1.743 [1.701–1.753] µs/op | 2.17× |
+| IoT request signing | 2.743 [2.733–2.761] µs/op | 2.714 [2.312–2.810] µs/op | 1.01× |
+| JSON → device status | 16.381 [16.334–16.446] µs/op | 10.089 [9.959–10.170] µs/op | 1.62× |
+| JSON → push update | 14.291 [14.243–14.356] µs/op | 11.501 [11.406–11.538] µs/op | 1.24× |
+
+The biggest measured advantage is CLI startup: roughly **204 ms → 1.18 ms**,
+with peak resident memory around **52.4 MiB → 3.58 MiB**. Matching SDK operations
+show smaller gains: about **2.17×** for token encryption, **1.62×** for status
+parsing, and **1.24×** for push parsing. **Request signing is effectively tied**;
+its timing distributions overlap. These results do not establish a universal
+Rust/Python speed ratio.
+
+Each SDK workload uses identical synthetic inputs and checks equivalent outputs
+before timing. Results cover 15 interleaved batches per implementation, each
+with 1,000 warmup operations. JSON workloads include decoding and model creation.
+Startup uses 31 fresh processes per implementation after five warmups, with
+warm OS file caches; memory uses seven separate processes. The Python startup
+target is a snapshot of the original companion API wrapper, and Rust uses the
+release CLI. Their normal imports/runtime setup are included; help text differs.
+CPU affinity also constrains the Rust runtime worker pool.
+
+**Scope:** offline local work only. No credentials, network requests, device
+operations, or cloud latency are involved. Saving milliseconds in startup does
+not establish faster cleaning, MQTT delivery, or live API responses. The cat’s
+patience was not instrumented.
+
+See [raw samples and environment metadata](benchmarks/results-m1.json) and
+[benchmark code, methodology, and reproduction instructions](benchmarks/README.md).
 
 ## Build and run
 

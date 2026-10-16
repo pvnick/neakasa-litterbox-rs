@@ -1,0 +1,16 @@
+# Reference environment used for results-m1.json (CPython 3.14).
+neakasa-litterbox-sdk @ git+https://github.com/pvnick/neakasa-litterbox-sdk.git@4be4fc72034752f227327c750c34921c53cf5a11
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.4
+aiomqtt==2.5.1
+aiosignal==1.4.0
+attrs==26.1.0
+cffi==2.1.1
+cryptography==50.0.2
+frozenlist==1.8.0
+idna==3.20
+multidict==6.9.1
+paho-mqtt==2.1.0
+propcache==0.5.4
+pycparser==3.1
+yarl==1.25.1
