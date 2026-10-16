@@ -1,5 +1,7 @@
 # neakasa-litterbox-rs
 
+*May your latency be low and your litter throughput high.*
+
 A native asynchronous Rust port of Rodrigo Roque's
 [Neakasa Litterbox Python SDK](https://github.com/roquerodrigo/neakasa-litterbox-sdk),
 with a standalone `neakasa-api` CLI. Based on the
