@@ -40,6 +40,36 @@ implementations. Python is not needed to build or run them. The optional
 `--import-session` command requires `adb` and the already-running Android
 environment; ordinary commands use the existing host-side state.
 
+## A truly smart home needs a sufficiently overengineered toaster
+
+A home cannot be truly smart until its breakfast appliances can inquire about
+the litter box. This port brings that architectural ambition one executable
+closer to reality. Whether the toaster should possess this knowledge remains
+outside the scope of the SDK.
+
+The practical benefit is simpler deployment: build for a compatible processor
+and operating system, then run the native executable without installing Python
+or its package environment. Small Linux computers, home servers, and compatible
+Linux-based appliance controllers are potential deployment targets. The async
+library can also be embedded in a Rust home-automation service, while the CLI's
+JSON output can feed scripts, dashboards, and scheduled status checks.
+
+A sufficiently capable Linux-powered toaster could therefore host a custom
+integration. The toaster's original microcontroller probably cannot: this SDK
+uses the Rust standard library and expects OS threads, sockets, TLS support,
+internet access, and enough memory for its runtime and connections. It is not a
+bare-metal firmware library. Each target needs an appropriate build and testing;
+the verified platform here is Linux `aarch64`, not a kitchen-appliance test lab.
+
+The measured **3.58 MiB** peak belongs to `--help`, not an active cloud session.
+Rust does not automatically make unsupported hardware compatible, and this port
+does not include a ready-made toaster or home-automation integration. What it
+provides is a native SDK and CLI with which to build one. Device access still
+uses the Neakasa cloud; deploying locally does not make it an offline LAN API.
+
+At last, a foundation for a home where every appliance can be kept informed of
+the cat's business. The cat has requested administrator privileges.
+
 ## Benchmarks
 
 Measured on **October 16, 2026**, on an **Apple M1 performance core**, Linux
