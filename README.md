@@ -7,6 +7,12 @@ with a standalone `neakasa-api` CLI. Based on the
 and its companion local Python API wrapper. Includes authentication, device
 status and controls, cat profiles, weight updates, visit history, and MQTT streaming.
 
+> **202.41 critical milliseconds reclaimed per CLI startup.**
+> Our M1 benchmark measured median `--help` startup at **203.586 ms in Python**
+> versus **1.176 ms in Rust**. That is approximately **0.202 seconds** returned
+> to the demanding business of standing beside a litter box.
+> These are measured local startup savings; the cloud remains on its own schedule.
+
 ## Why Rust? Because the cat cannot wait.
 
 Some software can tolerate delay. A cat has already filed three incident reports
@@ -17,6 +23,11 @@ is standing in a box of sand.
 Naturally, it deserves a compiled executable, explicit error handling, and memory
 safety. When the next litter-box event arrives, we intend to be ready. The cat
 has declined to participate in sprint planning.
+
+Every one of those **202.41 milliseconds** matters to a stakeholder who considers
+a closed bathroom door a production outage. We have eliminated approximately
+**99.42% of the measured startup wait**. The remaining 1.176 ms is presumably
+already the subject of an escalated support ticket.
 
 The practical benefits are a standalone executable with no Python runtime and
 an asynchronous Rust library for integration into Rust applications. The
