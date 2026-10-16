@@ -1,0 +1,59 @@
+{
+  "boot": [
+    {
+      "plain": "",
+      "cipher": ""
+    },
+    {
+      "plain": "400115938",
+      "cipher": "Z43Eoxa3H8GKVr4PVKKR5A=="
+    },
+    {
+      "plain": "1234567890123456",
+      "cipher": "sYQCXzqh6Mhka71sobWbkA=="
+    },
+    {
+      "plain": "hello world",
+      "cipher": "6pLuuH+z9jDltqU/gp+Asg=="
+    },
+    {
+      "plain": "\u732b\u54aa",
+      "cipher": "Q6VVkc+EvvuuMIiXSOOAkg=="
+    }
+  ],
+  "double_md5": "477831ec950d1ffa47797f5857f34a93",
+  "session_token": "l0K/tvhi6xIl2Rp5HHVuzYU+/7czCHDLsLa2SjlNE57AhNsyUjjwtyhF5IEb3mpG",
+  "iot_body": "{\"hello\":\"\u4e16\u754c\"}",
+  "iot_headers": {
+    "date": "Tue, 19 May 2026 02:16:53 GMT",
+    "x-ca-signature": "d3V5ciPueTk8+B/SHeat6hEaBJI=",
+    "x-ca-nonce": "fixed",
+    "x-ca-key": "32715650",
+    "ca_version": "1",
+    "accept": "application/json; charset=utf-8",
+    "content-md5": "Aulw/A6cvXyhaQxbZTIGCQ==",
+    "x-ca-timestamp": "1779157013115",
+    "x-ca-signature-headers": "x-ca-nonce,x-ca-timestamp,x-ca-key,x-ca-signature-method",
+    "content-type": "application/octet-stream; charset=utf-8",
+    "x-ca-signature-method": "HmacSHA1",
+    "user-agent": "neakasa-litterbox-sdk/0.2.2"
+  },
+  "oa_headers": {
+    "accept": "application/json",
+    "content-type": "application/x-www-form-urlencoded",
+    "date": "Tue, 19 May 2026 02:16:53 GMT",
+    "x-ca-key": "32715650",
+    "x-ca-nonce": "fixed",
+    "x-ca-signature": "jum1hovJztZaA6jQ/uGb/21yZoN/D/UdIUT1pS5i2Lw=",
+    "x-ca-signature-headers": "x-ca-nonce,x-ca-timestamp,x-ca-key,x-ca-signature-method",
+    "x-ca-signature-method": "HmacSHA256",
+    "x-ca-timestamp": "1779157013",
+    "user-agent": "neakasa-litterbox-sdk/0.2.2"
+  },
+  "mqtt_auth": {
+    "clientId": "cdf9bxg7",
+    "deviceSn": "m7yr2bp9zoxn9aj5e6yvbgsl7v3rxqdk",
+    "timestamp": "1779157013115",
+    "sign": "fd540486f9b1cc0b19072c6a0c85da83bae1db35"
+  }
+}

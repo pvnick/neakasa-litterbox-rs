@@ -1,0 +1,301 @@
+{
+  "properties": {
+    "Sand": {
+      "value": {
+        "percent": 73
+      },
+      "time": 1700000000000
+    },
+    "catLeft": {
+      "value": {
+        "kitten": 1,
+        "stayTime": 47,
+        "needClean": 1
+      },
+      "time": 1700000000000
+    },
+    "cleanCfg": {
+      "value": {
+        "active": 0,
+        "cleanType": 1,
+        "cleanParam": 10
+      },
+      "time": 1700000000000
+    },
+    "room_of_bin": {
+      "value": 1,
+      "time": 1700000000000
+    },
+    "bucketStatus": {
+      "value": 5,
+      "time": 1700000000000
+    },
+    "latestAddSandTime": {
+      "value": "today",
+      "time": 1700000000000
+    },
+    "autoLevel": {
+      "value": 1,
+      "time": 1700000000000
+    },
+    "silentMode": {
+      "value": 0,
+      "time": 1700000000000
+    },
+    "childLockOnOff": {
+      "value": 1,
+      "time": 1700000000000
+    },
+    "youngCatMode": {
+      "value": 0,
+      "time": 1700000000000
+    },
+    "actionLog": {
+      "value": "clean",
+      "time": 1700000000000
+    },
+    "NetWorkStatus": {
+      "value": {
+        "WiFi_Name": "test",
+        "WiFi_RSSI": -55,
+        "IP_Addr": "192.0.2.1",
+        "MAC_Addr": "00:00:00:00:00:00"
+      },
+      "time": 1700000000000
+    },
+    "DeviceVer": {
+      "value": {
+        "FW_Version": "1",
+        "HW_Version": "2"
+      },
+      "time": 1700000000000
+    },
+    "timestamp": {
+      "value": 1700000000,
+      "time": 1700000000000
+    },
+    "newProperty": {
+      "value": {
+        "value": 3
+      },
+      "time": 1700000000000
+    }
+  },
+  "status": {
+    "sand_percent": 73,
+    "cat_present": true,
+    "cat_stay_seconds": 47,
+    "needs_cleaning": true,
+    "bucket_full": true,
+    "operating_state": 5,
+    "last_sand_added": "today",
+    "cleaning_enabled": false,
+    "auto_level": true,
+    "silent_mode": false,
+    "child_lock": true,
+    "young_cat_mode": false,
+    "last_action": "clean",
+    "wifi_name": "test",
+    "wifi_rssi": -55,
+    "ip_address": "192.0.2.1",
+    "mac_address": "00:00:00:00:00:00",
+    "firmware_version": "1",
+    "hardware_version": "2",
+    "updated_at": 1700000000
+  },
+  "push": {
+    "params": {
+      "deviceName": "TEST01",
+      "items": {
+        "Sand": {
+          "value": {
+            "percent": 73
+          },
+          "time": 1700000000000
+        },
+        "catLeft": {
+          "value": {
+            "kitten": 1,
+            "stayTime": 47,
+            "needClean": 1
+          },
+          "time": 1700000000000
+        },
+        "cleanCfg": {
+          "value": {
+            "active": 0,
+            "cleanType": 1,
+            "cleanParam": 10
+          },
+          "time": 1700000000000
+        },
+        "room_of_bin": {
+          "value": 1,
+          "time": 1700000000000
+        },
+        "bucketStatus": {
+          "value": 5,
+          "time": 1700000000000
+        },
+        "latestAddSandTime": {
+          "value": "today",
+          "time": 1700000000000
+        },
+        "autoLevel": {
+          "value": 1,
+          "time": 1700000000000
+        },
+        "silentMode": {
+          "value": 0,
+          "time": 1700000000000
+        },
+        "childLockOnOff": {
+          "value": 1,
+          "time": 1700000000000
+        },
+        "youngCatMode": {
+          "value": 0,
+          "time": 1700000000000
+        },
+        "actionLog": {
+          "value": "clean",
+          "time": 1700000000000
+        },
+        "NetWorkStatus": {
+          "value": {
+            "WiFi_Name": "test",
+            "WiFi_RSSI": -55,
+            "IP_Addr": "192.0.2.1",
+            "MAC_Addr": "00:00:00:00:00:00"
+          },
+          "time": 1700000000000
+        },
+        "DeviceVer": {
+          "value": {
+            "FW_Version": "1",
+            "HW_Version": "2"
+          },
+          "time": 1700000000000
+        },
+        "timestamp": {
+          "value": 1700000000,
+          "time": 1700000000000
+        },
+        "newProperty": {
+          "value": {
+            "value": 3
+          },
+          "time": 1700000000000
+        }
+      }
+    }
+  },
+  "update": {
+    "device_name": "TEST01",
+    "changes": {
+      "sand_percent": 73,
+      "cat_present": true,
+      "cat_stay_seconds": 47,
+      "needs_cleaning": true,
+      "cleaning_enabled": false,
+      "bucket_full": true,
+      "operating_state": 5,
+      "last_sand_added": "today",
+      "auto_level": true,
+      "silent_mode": false,
+      "child_lock": true,
+      "young_cat_mode": false,
+      "last_action": "clean",
+      "NetWorkStatus": {
+        "WiFi_Name": "test",
+        "WiFi_RSSI": -55,
+        "IP_Addr": "192.0.2.1",
+        "MAC_Addr": "00:00:00:00:00:00"
+      },
+      "DeviceVer": {
+        "FW_Version": "1",
+        "HW_Version": "2"
+      },
+      "timestamp": 1700000000,
+      "newProperty": {
+        "value": 3
+      }
+    }
+  },
+  "cat_raw": {
+    "id": 7,
+    "name": "Example",
+    "weight": "4.8",
+    "unit": "kg",
+    "gender": 2,
+    "enabled": 1
+  },
+  "cat": {
+    "id": 7,
+    "name": "Example",
+    "weight": 4.8,
+    "unit": "kg",
+    "avatar": "",
+    "birthday": "",
+    "variety": -1,
+    "gender": 2,
+    "sterilization": 0,
+    "enabled": 1,
+    "path": ""
+  },
+  "record_raw": {
+    "record_id": 9,
+    "type": 1,
+    "cat_id": 7,
+    "start_time": 10,
+    "end_time": 57,
+    "weight": 4.8,
+    "unit": "kg"
+  },
+  "record": {
+    "record_id": 9,
+    "record_type": 1,
+    "cat_id": 7,
+    "start_time": 10,
+    "end_time": 57,
+    "weight": 4.8,
+    "unit": "kg",
+    "way": 0
+  },
+  "device_raw": {
+    "iotId": "iot-1",
+    "deviceName": "TEST01",
+    "productName": "Test",
+    "productKey": "pk",
+    "owned": 1,
+    "status": 1
+  },
+  "device": {
+    "iot_id": "iot-1",
+    "product_key": "pk",
+    "product_name": "Test",
+    "device_name": "TEST01",
+    "category_key": "",
+    "category_name": "",
+    "net_type": "",
+    "role": 1,
+    "status": 1,
+    "bind_time": 0
+  },
+  "statistics_raw": {
+    "date": "2026-10-15",
+    "num": 2,
+    "weight": 4.8,
+    "weight_avg": 4.8,
+    "toilet_total_second": 47,
+    "unit": "kg"
+  },
+  "statistics": {
+    "date": "2026-10-15",
+    "num": 2,
+    "weight": 4.8,
+    "unit": "kg",
+    "toilet_total_second": 47,
+    "weight_avg": 4.8
+  }
+}

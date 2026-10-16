@@ -1,0 +1,13 @@
+/target/
+*.env
+.env
+.env.*
+credentials.json
+session.json
+.session-*.tmp
+device.json
+app-user.json
+*.log
+*.key
+*.p12
+*.pfx

@@ -1,0 +1,46 @@
+[package]
+name = "neakasa-litterbox-sdk"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Rust port of the Neakasa litter-box SDK and local API CLI"
+repository = "https://github.com/pvnick/neakasa-litterbox-rs"
+readme = "README.md"
+
+[lib]
+name = "neakasa_litterbox_sdk"
+
+[[bin]]
+name = "neakasa-api"
+path = "src/bin/neakasa-api.rs"
+
+[dependencies]
+aes = "0.8"
+aes-gcm = "0.10"
+base64 = "0.22"
+cbc = { version = "0.1", features = ["alloc"] }
+clap = { version = "4", features = ["derive"] }
+hmac = "0.12"
+httpdate = "1"
+md-5 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+roxmltree = "0.20"
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha1 = "0.10"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal", "process"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+bytes = "1"
+rcgen = "0.13"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tempfile = "3"
+wiremock = "0.6"

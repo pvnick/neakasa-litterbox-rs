@@ -1,0 +1,14 @@
+{
+  "user_xml": "<map><string name=\"USER_OBJ\">eyJsb2dpblRva2VuIjogImNQSnF5UEdUVE1WbDAyOVI0SXZvY0ZNbVdmaE55QTJvbmR5NnVvYmM2Rm9nUGIwN1RtbmFSWi9YaWYzRkd0cXgiLCAidXNlckluZm8iOiB7InVzZXJJZCI6IDEsICJ1c2VyTmFtZSI6ICJ0ZXN0QGV4YW1wbGUuaW52YWxpZCIsICJhbGlVc2VySWQiOiA0NTYsICJhbGlBdXRoZW50aWNhdGlvblRva2VuIjogInRlc3QtYXV0aCIsICJhbGlJZGVudGl0eUlkIjogInRlc3QtaWRlbnRpdHkifX0=</string><string name=\"CurrentBaseRegionURL\">https://usapi.neakasapet.com/api/</string></map>",
+  "secure_xml": "<map><string name=\"KEY_IOT_CREDENTIAL_DATAv2\">MDEyMzQ1Njc4OWFirJb2eEyQJ3D06mXfUABFNZrhLI5owQ0ZGQNA6xkvSJFtQyreqHW+2SKGB3fQi5DF9oOyqgEF5nFFhG0gnDTbOztpJwOy</string></map>",
+  "user": {
+    "loginToken": "cPJqyPGTTMVl029R4IvocFMmWfhNyA2ondy6uobc6FogPb07TmnaRZ/Xif3FGtqx",
+    "userInfo": {
+      "userId": 1,
+      "userName": "test@example.invalid",
+      "aliUserId": 456,
+      "aliAuthenticationToken": "test-auth",
+      "aliIdentityId": "test-identity"
+    }
+  }
+}
