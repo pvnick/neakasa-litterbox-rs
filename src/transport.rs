@@ -7,9 +7,30 @@ use serde_json::Value;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
+#[derive(Clone, Copy)]
+pub(crate) enum IoFailure {
+    Network,
+    Timeout,
+}
+impl From<reqwest::Error> for IoFailure {
+    fn from(error: reqwest::Error) -> Self {
+        if error.is_timeout() {
+            Self::Timeout
+        } else {
+            Self::Network
+        }
+    }
+}
+pub(crate) type WireResponse = std::result::Result<(u16, Vec<u8>), IoFailure>;
+#[cfg(test)]
+type MockHttp = std::sync::Arc<dyn Fn(reqwest::Request) -> WireResponse + Send + Sync>;
 #[derive(Clone)]
 pub struct Transport {
     http: Client,
+    #[cfg(test)]
+    pub(crate) mqtt_factory: Option<crate::mqtt::Factory>,
+    #[cfg(test)]
+    pub(crate) mock: Option<MockHttp>,
 }
 impl Transport {
     pub fn new(timeout: Duration) -> Result<Self> {
@@ -18,7 +39,13 @@ impl Transport {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| Error::Transport)?;
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            #[cfg(test)]
+            mock: None,
+            #[cfg(test)]
+            mqtt_factory: None,
+        })
     }
     fn headers(mut request: RequestBuilder, headers: Headers) -> RequestBuilder {
         for (name, value) in headers {
@@ -26,17 +53,30 @@ impl Transport {
         }
         request
     }
-    async fn execute(request: RequestBuilder) -> Result<Value> {
-        let response = request.send().await.map_err(|_| Error::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(Error::Http(status.as_u16()));
+    fn decode(response: WireResponse) -> Result<Value> {
+        let (status, bytes) = response.map_err(|_| Error::Transport)?;
+        if !(200..300).contains(&status) {
+            return Err(Error::Http(status));
         }
-        let value: Value = response.json().await.map_err(|_| Error::InvalidResponse)?;
-        if !value.is_object() {
-            return Err(Error::InvalidResponse);
+        crate::json::loads(&bytes)
+    }
+    async fn execute(&self, request: RequestBuilder) -> Result<Value> {
+        #[cfg(test)]
+        if let Some(mock) = &self.mock {
+            return Self::decode(mock(request.build().map_err(|_| Error::Transport)?));
         }
-        Ok(value)
+        let wire = async {
+            let response = request.send().await.map_err(IoFailure::from)?;
+            let status = response.status().as_u16();
+            // Do not retain a potentially sensitive error response body.
+            if !(200..300).contains(&status) {
+                return Ok((status, Vec::new()));
+            }
+            let bytes = response.bytes().await.map_err(IoFailure::from)?;
+            Ok((status, bytes.to_vec()))
+        }
+        .await;
+        Self::decode(wire)
     }
     pub async fn get(
         &self,
@@ -44,11 +84,13 @@ impl Transport {
         params: &[(String, String)],
         headers: Headers,
     ) -> Result<Value> {
-        Self::execute(Self::headers(self.http.get(url).query(params), headers)).await
+        self.execute(Self::headers(self.http.get(url).query(params), headers))
+            .await
     }
     pub async fn post_json(&self, url: &str, body: Value, mut headers: Headers) -> Result<Value> {
         headers.insert("Content-Type".into(), "application/json".into());
-        Self::execute(Self::headers(self.http.post(url), headers).json(&body)).await
+        self.execute(Self::headers(self.http.post(url), headers).json(&body))
+            .await
     }
     pub async fn iot(
         &self,
@@ -70,7 +112,7 @@ impl Transport {
             &httpdate::fmt_http_date(SystemTime::now()),
         );
         let base = gateway_url(host)?;
-        Self::execute(Self::headers(
+        self.execute(Self::headers(
             self.http.post(format!("{base}{path}")).body(body),
             headers,
         ))
@@ -94,7 +136,7 @@ impl Transport {
         if let Some(vid) = vid {
             headers.insert("vid".into(), vid.into());
         }
-        Self::execute(Self::headers(
+        self.execute(Self::headers(
             self.http
                 .post(format!("{}{path}", gateway_url(host)?))
                 .body(wire),

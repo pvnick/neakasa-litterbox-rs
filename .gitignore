@@ -14,3 +14,6 @@ app-user.json
 .venv-bench/
 __pycache__/
 *.pyc
+
+.venv-suite/
+.pytest_cache/

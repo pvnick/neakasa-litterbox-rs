@@ -68,7 +68,13 @@ impl From<std::io::Error> for Error {
     }
 }
 pub(crate) fn unwrap_rest(value: Value) -> Result<Value> {
+    unwrap_rest_context(value, true)
+}
+pub(crate) fn unwrap_rest_context(value: Value, auth: bool) -> Result<Value> {
     let code = value["code"].as_i64().unwrap_or(-1);
+    if code != 0 && !auth {
+        return Err(Error::Api(code));
+    }
     match code {
         0 => Ok(value["data"].clone()),
         1007 | 3026 | 3027 => Err(Error::SessionExpired(code)),

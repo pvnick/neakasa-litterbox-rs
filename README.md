@@ -7,11 +7,12 @@ with a standalone `neakasa-api` CLI. Based on the
 and its companion local Python API wrapper. Includes authentication, device
 status and controls, cat profiles, weight updates, visit history, and MQTT streaming.
 
-> **202.41 critical milliseconds reclaimed per CLI startup.**
-> Our M1 benchmark measured median `--help` startup at **203.586 ms in Python**
-> versus **1.176 ms in Rust**. That is approximately **0.202 seconds** returned
-> to the demanding business of standing beside a litter box.
-> These are measured local startup savings; the cloud remains on its own schedule.
+> **2.305 important milliseconds reclaimed across 50 matched test calls.**
+> The measured calls took **2.586 ms in Python** and
+> **0.281 ms in Rust**, excluding imports and collection.
+> All 240 reference cases have mapped Rust counterparts; language and mock
+> differences are [documented explicitly](tests/ALIGNMENT.md).
+> The cat considers the saved time operationally significant. Cloud latency was not measured.
 
 ## Why Rust? Because the cat cannot wait.
 
@@ -24,10 +25,10 @@ Naturally, it deserves a compiled executable, explicit error handling, and memor
 safety. When the next litter-box event arrives, we intend to be ready. The cat
 has declined to participate in sprint planning.
 
-Every one of those **202.41 milliseconds** matters to a stakeholder who considers
-a closed bathroom door a production outage. We have eliminated approximately
-**99.42% of the measured startup wait**. The remaining 1.176 ms is presumably
-already the subject of an escalated support ticket.
+Every one of those **2.305 milliseconds** matters to a stakeholder who considers
+a closed bathroom door a production outage. The earlier startup benchmark saved
+**202.41 ms** per `--help` invocation; the new comparison also measures actual test
+calls. The cat has requested that we spend the savings opening the door.
 
 The practical benefits are a standalone executable with no Python runtime and
 an asynchronous Rust library for integration into Rust applications. The
@@ -71,6 +72,65 @@ At last, a foundation for a home where every appliance can be kept informed of
 the cat's business. The cat has requested administrator privileges.
 
 ## Benchmarks
+
+### Actual test suites, with an audited case map
+
+The reference Python suite has **240 cases**; the Rust suite now has **240 mapped
+counterparts plus 28 additional integration tests**, all passing. The
+[case manifest](tests/alignment.json) pins the upstream source and maps every
+parameterized case. The [alignment report](tests/ALIGNMENT.md) distinguishes
+literal fixture/assertion matches from language and test-boundary adaptations.
+**This is exact inventory alignment, not a claim that all 240 tests do identical
+work.**
+
+The strict paired comparison therefore runs the same **50 approved cases** in
+both languages. It includes model parsing, cryptography, request signing, status
+updates, JSON helpers, and the full mocked EU handshake/routing regression.
+Cases with different mock depth, ownership, runtime typing, error messages,
+packaging, or callback/TLS scaffolding remain in full-suite validation but are
+excluded from the strict timing set.
+
+Medians [25th–75th percentile], Apple M1 CPU 4, Linux `aarch64`, Rust 1.99.1
+release tests, CPython 3.14.8, pytest 9.0.3. Three warmups and 21 alternating
+samples per language, sequential tests, no coverage instrumentation or cloud I/O.
+
+| Strict paired workload: 50 cases | Python | Rust |
+| --- | ---: | ---: |
+| Sum of test-call durations | 2.586 [2.575–2.593] ms | 0.281 [0.270–0.336] ms |
+| Whole test process | 359.480 [358.271–361.142] ms | 4.313 [4.160–4.569] ms |
+
+That saves **2.305 ms across the 50 test calls** (9.21× lower measured
+call time). These are vitally important litter-box engineering milliseconds,
+now measured somewhere beyond the help screen. They are **not milliseconds
+saved per API request**.
+
+Test-call timing excludes imports, collection, external fixtures, native harness
+thread/Tokio startup, and timing-log writes. It includes assertions, in-call
+fixtures and mocks, async scheduling, and framework call dispatch. Whole-process
+timing includes all of those costs. The runners differ, so neither number is a
+universal Rust/Python SDK speed ratio. The difference between the rows shows how
+strongly startup and test-framework overhead affect a small suite.
+
+For completeness, here is the **full 240-case suite**, including documented
+adaptations. These are developer feedback timings, **not** the apples-to-apples
+comparison above:
+
+| Full suite: 240 mapped cases | Python | Rust |
+| --- | ---: | ---: |
+| Sum of test-call durations | 77.353 [77.223–77.381] ms | 25.232 [25.040–25.391] ms |
+| Whole test process | 637.296 [634.081–639.005] ms | 36.909 [36.562–37.307] ms |
+
+Compilation is excluded from both tables. The script records its separate
+incremental prebuild step; it does not claim to measure clean compilation.
+The 28 extra Rust integration tests are excluded from cross-language timing.
+See [raw samples, per-case timings, and source hashes](benchmarks/suite-results-m1.json)
+and [reproduction instructions](benchmarks/README.md#test-suite-benchmark).
+
+### Earlier startup and SDK-operation measurements
+
+The following historical measurements used the original port at `5010ef9`,
+before the expanded suite and stream changes. They are retained as startup and
+operation results, not represented as the current test-suite benchmark.
 
 Measured on **October 16, 2026**, on an **Apple M1 performance core**, Linux
 `aarch64`, with both implementations pinned to CPU 4. Rust **1.99.1**, default
@@ -190,7 +250,7 @@ refresh, without printing authentication material:
 | Clean and level controls | `start_clean`, `stop_clean`, `start_level`, `stop_level` |
 | Settings | `set_auto_clean`, `set_auto_level`, `set_silent_mode`, `set_child_lock` |
 | Sand calibration | `calibrate_sand` |
-| Status callbacks | `watch_status`, then `StatusStream::next().await` |
+| Status updates / callbacks | `watch_status` + `next().await`, or lazy `status_stream` + `handlers()` + `start().await` |
 | Stream shutdown | `stop().await` or drop the stream |
 
 Settings and mechanical operations require explicit calls. `set_auto_clean`
@@ -199,9 +259,11 @@ Read current properties first and verify a fresh device report after a change.
 Cloud acceptance does not establish that a physical operation completed.
 
 Rust differences: errors are a typed `Error` enum; HTTP resources close when their
-owners drop; status updates use a bounded async receiver instead of Python
-callbacks. The stream verifies TLS certificates, waits for subscription and
-account-binding acknowledgements, and reconnects with bounded backoff.
+owners drop; status updates use a bounded async receiver with optional callbacks
+registered through `Handlers`. Callback errors are returned as `Result` values.
+The stream verifies TLS certificates, rejects failed subscription acknowledgements,
+waits for account binding, and reconnects with bounded backoff. Construction can
+be lazy; explicit `start()` and `stop()` are idempotent, and restart clears stale errors.
 `StreamOptions` supports custom certificate configuration and broker endpoints.
 
 The working wrapper's explicit Aliyun JSON envelopes and US app endpoint
@@ -226,12 +288,14 @@ binding, push delivery, reconnect, timeouts, and shutdown. CLI tests cover local
 errors and the endpoint guard. Real device writes and mechanical operations are
 not part of automated verification.
 
-Local verification on October 16, 2026: all 28 tests passed, formatting and
-Clippy checks passed, and the release executable built successfully. Live Rust
-login, cat profiles, status, and 24-hour history succeeded. Profiles returned
-the expected profile weights. No profile or device settings were changed.
+Local verification on October 16, 2026: all 268 Rust tests and all 240 reference
+Python tests passed; formatting and Clippy checks passed, and the release
+executable built successfully. No cloud calls or device writes were made for
+the test-suite benchmark.
 
-Live `watch` returned API code **2043**. A comparison using the installed Python
+Earlier live checks of Rust login, cat profiles, status, and 24-hour history
+succeeded. Profiles returned the expected weights without changing settings.
+Earlier live `watch` returned API code **2043**. A comparison using the installed Python
 SDK returned the same code during MQTT account binding. The Rust stream passes
 the local TLS broker tests, but live push delivery remains unverified while this
 shared cloud/account failure persists. REST status polling works.
@@ -244,7 +308,9 @@ device, or working session. The CLI currently expects that state to have been
 provisioned already; it is not an interactive account-setup tool.
 
 Test accounts, tokens, IDs, encryption inputs, and Android preferences in
-`tests/fixtures` are synthetic. The bundled PEM file is a public root certificate,
+`tests/fixtures` are synthetic. `tests/reference` preserves public upstream test
+fixtures, including its example account data; these are not this repository
+owner's saved credentials. The bundled PEM file is a public root certificate,
 not a private key. Shared app protocol constants in `src/constants.rs` and the
 boot encryption constants in `src/auth.rs` originate in the upstream SDK; they
 are not a user's password, session token, or per-account encryption keys.

@@ -2,11 +2,10 @@
 use crate::{
     Error, LoginResult, Result, StatusUpdate, auth, error::unwrap_iot, transport::Transport,
 };
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, TlsConfiguration};
+
 use serde_json::{Value, json};
-use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task::JoinHandle};
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct ReconnectPolicy {
@@ -65,13 +64,99 @@ impl Default for StreamOptions {
     }
 }
 
-/// Pull-based Rust equivalent of Python's callback stream. Dropping it stops all tasks.
+/// A lazily constructed stream; `start` and `stop` are idempotent.
+/// It supports pull consumption and optional callbacks. Dropping cancels its tasks.
 pub struct StatusStream {
     receiver: mpsc::Receiver<Result<StatusUpdate>>,
     task: Option<JoinHandle<()>>,
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    transport: Transport,
+    login: LoginResult,
+    options: StreamOptions,
+    handlers: Arc<Handlers>,
+}
+type ChangeHandler = Arc<dyn Fn(&StatusUpdate) -> Result<()> + Send + Sync>;
+type PropertyHandler = Arc<dyn Fn(&str, &str, &Value) -> Result<()> + Send + Sync>;
+#[derive(Default)]
+pub struct Handlers {
+    changes: std::sync::Mutex<Vec<ChangeHandler>>,
+    properties: std::sync::Mutex<Vec<(Option<String>, PropertyHandler)>>,
+}
+impl Handlers {
+    pub fn on_change(
+        &self,
+        callback: impl Fn(&StatusUpdate) -> Result<()> + Send + Sync + 'static,
+    ) {
+        self.changes.lock().unwrap().push(Arc::new(callback));
+    }
+    pub fn on_property(
+        &self,
+        key: &str,
+        callback: impl Fn(&str, &str, &Value) -> Result<()> + Send + Sync + 'static,
+    ) {
+        self.properties
+            .lock()
+            .unwrap()
+            .push((Some(key.into()), Arc::new(callback)));
+    }
+    pub fn on_unknown(
+        &self,
+        callback: impl Fn(&str, &str, &Value) -> Result<()> + Send + Sync + 'static,
+    ) {
+        self.properties
+            .lock()
+            .unwrap()
+            .push((None, Arc::new(callback)));
+    }
+    pub fn dispatch(&self, update: &StatusUpdate) {
+        let properties = self.properties.lock().unwrap().clone();
+        let changes = self.changes.lock().unwrap().clone();
+        for (key, value) in &update.changes {
+            let known = matches!(
+                key.as_str(),
+                "silent_mode"
+                    | "child_lock"
+                    | "auto_level"
+                    | "young_cat_mode"
+                    | "cleaning_enabled"
+                    | "cat_present"
+                    | "needs_cleaning"
+                    | "bucket_full"
+                    | "sand_percent"
+                    | "cat_stay_seconds"
+                    | "last_sand_added"
+                    | "last_action"
+                    | "operating_state"
+            );
+            for (filter, cb) in properties.iter() {
+                if (filter.as_deref() == Some(key) || (filter.is_none() && !known))
+                    && cb(&update.device_name, key, value).is_err()
+                {
+                    log::warn!("status property handler failed");
+                }
+            }
+        }
+        for cb in changes.iter() {
+            if cb(update).is_err() {
+                log::warn!("status change handler failed");
+            }
+        }
+    }
+    pub fn handle_message(&self, topic: &str, payload: &[u8]) -> Option<StatusUpdate> {
+        if !topic.ends_with("/thing/properties") {
+            return None;
+        }
+        let value = serde_json::from_slice::<Value>(payload).ok()?;
+        let update = StatusUpdate::from_push(&value)?;
+        if update.changes.is_empty() {
+            return None;
+        }
+        self.dispatch(&update);
+        Some(update)
+    }
 }
 impl StatusStream {
-    pub(crate) async fn connect(
+    pub(crate) fn new(
         transport: Transport,
         login: LoginResult,
         options: StreamOptions,
@@ -79,195 +164,220 @@ impl StatusStream {
         if login.iot_token.is_empty() {
             return Err(Error::NotAuthenticated);
         }
-        if let Some(policy) = &options.reconnect {
-            policy.validate()?;
+        if let Some(p) = &options.reconnect {
+            p.validate()?;
         }
-        let tls = if let Some(config) = &options.tls_config {
-            config.clone()
-        } else {
-            let path = options.ca_certs.clone();
-            tokio::task::spawn_blocking(move || build_tls(path))
-                .await
-                .map_err(|_| Error::Mqtt)??
-        };
-        let initial = open(&transport, &login, &options, tls.clone()).await?;
-        let (sender, receiver) = mpsc::channel(64);
-        let task = tokio::spawn(async move {
-            let mut current = initial;
-            loop {
-                let failure = loop {
-                    if let Some(update) = current.pending.pop_front() {
-                        if sender.send(Ok(update)).await.is_err() {
-                            return;
-                        }
-                        continue;
-                    }
-                    match current.events.poll().await {
-                        Ok(Event::Incoming(Packet::Publish(p))) => {
-                            if let Ok(v) = serde_json::from_slice::<Value>(&p.payload)
-                                && let Some(update) = StatusUpdate::from_push(&v)
-                                && sender.send(Ok(update)).await.is_err()
-                            {
-                                return;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(_) => break Error::Mqtt,
-                    }
-                };
-                let Some(policy) = &options.reconnect else {
-                    let _ = sender.send(Err(failure)).await;
-                    return;
-                };
-                // Drop the old socket before bootstrapping and binding a fresh session.
-                drop(current);
-                let mut replacement = None;
-                for attempt in 1..=policy.max_attempts {
-                    tokio::time::sleep(policy.delay_for(attempt)).await;
-                    if sender.is_closed() {
-                        return;
-                    }
-                    if let Ok(next) = open(&transport, &login, &options, tls.clone()).await {
-                        replacement = Some(next);
-                        break;
-                    }
-                }
-                match replacement {
-                    Some(next) => current = next,
-                    None => {
-                        let _ = sender.send(Err(Error::Mqtt)).await;
-                        return;
-                    }
-                }
-            }
-        });
+        let (_, receiver) = mpsc::channel(64);
         Ok(Self {
+            transport,
+            login,
+            options,
             receiver,
-            task: Some(task),
+            task: None,
+            cancel: None,
+            handlers: Arc::new(Handlers::default()),
         })
+    }
+    pub fn handlers(&self) -> Arc<Handlers> {
+        self.handlers.clone()
+    }
+    pub fn is_running(&self) -> bool {
+        self.task.as_ref().is_some_and(|t| !t.is_finished())
+    }
+    pub(crate) async fn connect(
+        transport: Transport,
+        login: LoginResult,
+        options: StreamOptions,
+    ) -> Result<Self> {
+        let mut s = Self::new(transport, login, options)?;
+        s.start().await?;
+        Ok(s)
+    }
+    pub async fn start(&mut self) -> Result<()> {
+        if self.is_running() {
+            return Ok(());
+        }
+        let transport = self.transport.clone();
+        let login = self.login.clone();
+        let options = self.options.clone();
+        let handlers = self.handlers.clone();
+        let (sender, receiver) = mpsc::channel(64);
+        let mut current = open(
+            &transport,
+            &login,
+            &options,
+            handlers.clone(),
+            sender.clone(),
+        )
+        .await?;
+        self.receiver = receiver;
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        self.cancel = Some(cancel);
+        self.task = Some(tokio::spawn(async move {
+            tokio::select! {
+              _=cancelled=>{},
+              _=async {
+              loop {
+                  let failure = current.lost.recv().await.unwrap_or(Error::Transport);
+                  current.disconnect().await;
+                  let Some(policy) = &options.reconnect else {
+                      let _ = sender.send(Err(failure)).await;
+                      return;
+                  };
+                  let mut replacement = None;
+                  for attempt in 1..=policy.max_attempts {
+                      tokio::time::sleep(policy.delay_for(attempt)).await;
+                      if sender.is_closed() {
+                          return;
+                      }
+                      if let Ok(next) = open(
+                          &transport,
+                          &login,
+                          &options,
+                          handlers.clone(),
+                          sender.clone(),
+                      )
+                      .await
+                      {
+                          replacement = Some(next);
+                          break;
+                      }
+                  }
+                  match replacement {
+                      Some(next) => current = next,
+                      None => {
+                          let _ = sender.send(Err(Error::Mqtt)).await;
+                          return;
+                      }
+                  }
+              }
+              }=>{},
+            }
+            current.disconnect().await;
+        }));
+        Ok(())
     }
     pub async fn next(&mut self) -> Option<Result<StatusUpdate>> {
         self.receiver.recv().await
     }
+    pub async fn run_forever(&mut self) -> Result<()> {
+        while let Some(result) = self.next().await {
+            result?;
+        }
+        Ok(())
+    }
     pub async fn stop(&mut self) {
-        if let Some(task) = self.task.take() {
-            task.abort();
-            let _ = task.await;
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+        }
+        if let Some(t) = self.task.take() {
+            let _ = t.await;
         }
         self.receiver.close();
+        while self.receiver.try_recv().is_ok() {}
     }
 }
 impl Drop for StatusStream {
     fn drop(&mut self) {
-        if let Some(task) = &self.task {
-            task.abort();
+        if let Some(t) = &self.task {
+            t.abort();
         }
     }
-}
-
-struct Connection {
-    events: EventLoop,
-    _client: AsyncClient,
-    pending: VecDeque<StatusUpdate>,
 }
 async fn open(
     transport: &Transport,
     login: &LoginResult,
     options: &StreamOptions,
-    tls: Arc<rustls::ClientConfig>,
-) -> Result<Connection> {
-    let cid = Uuid::new_v4().simple().to_string();
-    let sn = Uuid::new_v4().simple().to_string();
+    handlers: Arc<Handlers>,
+    sender: mpsc::Sender<Result<StatusUpdate>>,
+) -> Result<crate::mqtt::MqttTransport> {
+    let creds = derive_mqtt_credentials(transport, &login.iot_host).await?;
+    let factory = crate::mqtt::real_factory(creds.clone(), options.broker_endpoint.clone());
+    #[cfg(test)]
+    let factory = transport.mqtt_factory.clone().unwrap_or(factory);
+    let handler: crate::mqtt::Handler = Arc::new(move |topic: String, payload: Vec<u8>| {
+        let handlers = handlers.clone();
+        let sender = sender.clone();
+        Box::pin(async move {
+            if let Some(update) = handlers.handle_message(&topic, &payload) {
+                sender
+                    .send(Ok(update))
+                    .await
+                    .map_err(|_| Error::Transport)?;
+            }
+            Ok(())
+        })
+    });
+    let mut t = crate::mqtt::MqttTransport::new(
+        &creds.product_key,
+        &creds.device_name,
+        &creds.username,
+        factory,
+        options.clone(),
+        handler,
+    );
+    let result = async {
+        t.connect().await?;
+        t.subscribe(&format!("{}/app/down/#", t.topic_prefix), 1)
+            .await?;
+        t.bind_account(&login.iot_token, options.timeout).await
+    }
+    .await;
+    if let Err(e) = result {
+        t.disconnect().await;
+        return Err(e);
+    }
+    Ok(t)
+}
+#[derive(Clone)]
+pub struct MqttCredentials {
+    pub host: String,
+    pub port: u16,
+    pub client_id: String,
+    pub username: String,
+    pub password: String,
+    pub product_key: String,
+    pub device_name: String,
+}
+pub fn random_auth_info(now_ms: u64) -> Value {
+    let cid = uuid::Uuid::new_v4().simple().to_string();
+    let sn = uuid::Uuid::new_v4().simple().to_string();
+    auth::mqtt_auth_info(now_ms, &cid[..8], &sn)
+}
+pub async fn derive_mqtt_credentials(
+    transport: &Transport,
+    gateway: &str,
+) -> Result<MqttCredentials> {
     let triple = unwrap_iot(
         transport
             .iot(
-                &login.iot_host,
+                gateway,
                 "/app/aepauth/handle",
                 "1.0.0",
                 None,
-                json!({"authInfo":auth::mqtt_auth_info(auth::now_ms(),&cid[..8],&sn)}),
+                json!({"authInfo":random_auth_info(auth::now_ms())}),
                 "en-US",
             )
             .await?,
     )?;
-    let pk = triple["productKey"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or(Error::InvalidResponse)?;
-    let dn = triple["deviceName"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or(Error::InvalidResponse)?;
-    let secret = triple["deviceSecret"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or(Error::InvalidResponse)?;
-    let (host, client_id, username, password) = mqtt_credentials(pk, dn, secret, &login.iot_host);
-    let (host, port) = options.broker_endpoint.clone().unwrap_or((host, 1883));
-    let mut mqtt = MqttOptions::new(client_id, host, port);
-    mqtt.set_credentials(&username, password)
-        .set_keep_alive(Duration::from_secs(60))
-        .set_clean_session(true)
-        .set_transport(rumqttc::Transport::tls_with_config(
-            TlsConfiguration::Rustls(tls),
-        ));
-    let (client, mut events) = AsyncClient::new(mqtt, 8);
-    let prefix = format!("/sys/{pk}/{dn}");
-    client
-        .subscribe(format!("{prefix}/app/down/#"), QoS::AtLeastOnce)
-        .await
-        .map_err(|_| Error::Mqtt)?;
-    let request_id = Uuid::new_v4().simple().to_string();
-    let bind = json!({"id":request_id,"system":{"version":"1.0","time":auth::now_ms().to_string()},"request":{"clientId":username},"params":{"iotToken":login.iot_token}});
-    let mut pending = VecDeque::new();
-    tokio::time::timeout(options.timeout, async {
-        let mut sent = false;
-        loop {
-            match events.poll().await.map_err(|_| Error::Mqtt)? {
-                Event::Incoming(Packet::SubAck(ack)) => {
-                    if ack
-                        .return_codes
-                        .iter()
-                        .any(|code| matches!(code, rumqttc::SubscribeReasonCode::Failure))
-                    {
-                        return Err(Error::Mqtt);
-                    }
-                    if !sent {
-                        client
-                            .publish(
-                                format!("{prefix}/app/up/account/bind"),
-                                QoS::AtLeastOnce,
-                                false,
-                                serde_json::to_vec(&bind)?,
-                            )
-                            .await
-                            .map_err(|_| Error::Mqtt)?;
-                        sent = true;
-                    }
-                }
-                Event::Incoming(Packet::Publish(p)) => {
-                    if let Ok(v) = serde_json::from_slice::<Value>(&p.payload) {
-                        if v["id"].as_str() == Some(&request_id) {
-                            unwrap_iot(v)?;
-                            return Ok(());
-                        }
-                        if let Some(update) = StatusUpdate::from_push(&v)
-                            && pending.len() < 64
-                        {
-                            pending.push_back(update);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    })
-    .await
-    .map_err(|_| Error::Timeout)??;
-    Ok(Connection {
-        events,
-        _client: client,
-        pending,
+    let field = |key: &str| {
+        triple[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or(Error::Api(-1))
+    };
+    let pk = field("productKey")?;
+    let dn = field("deviceName")?;
+    let secret = field("deviceSecret")?;
+    let (host, client_id, username, password) = mqtt_credentials(pk, dn, secret, gateway);
+    Ok(MqttCredentials {
+        host,
+        port: 1883,
+        client_id,
+        username,
+        password,
+        product_key: pk.into(),
+        device_name: dn.into(),
     })
 }
 pub fn mqtt_credentials(
@@ -292,7 +402,7 @@ pub fn mqtt_credentials(
         password,
     )
 }
-fn build_tls(path: Option<PathBuf>) -> Result<Arc<rustls::ClientConfig>> {
+pub(crate) fn root_store(path: Option<PathBuf>) -> Result<rustls::RootCertStore> {
     let mut roots = rustls::RootCertStore::empty();
     if let Some(path) = path {
         let bytes = std::fs::read(path)?;
@@ -311,12 +421,26 @@ fn build_tls(path: Option<PathBuf>) -> Result<Arc<rustls::ClientConfig>> {
             .add(cert.map_err(|_| Error::Crypto)?)
             .map_err(|_| Error::Crypto)?;
     }
+    Ok(roots)
+}
+pub(crate) fn verifier(
+    roots: rustls::RootCertStore,
+) -> Result<Arc<rustls::client::WebPkiServerVerifier>> {
+    rustls::client::WebPkiServerVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::new(rustls::crypto::ring::default_provider()),
+    )
+    .build()
+    .map_err(|_| Error::Crypto)
+}
+pub(crate) fn build_tls(path: Option<PathBuf>) -> Result<Arc<rustls::ClientConfig>> {
+    let verify = verifier(root_store(path)?)?;
     let config = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
     .with_safe_default_protocol_versions()
     .map_err(|_| Error::Crypto)?
-    .with_root_certificates(roots)
+    .with_webpki_verifier(verify)
     .with_no_client_auth();
     Ok(Arc::new(config))
 }

@@ -33,7 +33,7 @@ impl Peer {
     }
     async fn publish(&mut self, v: Value) {
         self.send(Packet::Publish(Publish::new(
-            "/sys/pk/dn/app/down/test",
+            "/sys/pk/dn/app/down/thing/properties",
             QoS::AtMostOnce,
             serde_json::to_vec(&v).unwrap(),
         )))

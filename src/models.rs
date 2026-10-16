@@ -1,4 +1,4 @@
-use crate::{Error, Result, auth};
+use crate::{Result, auth};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -8,11 +8,13 @@ fn default_gateway() -> String {
 }
 pub(crate) fn int(v: &Value) -> i64 {
     v.as_i64()
+        .or_else(|| v.as_bool().map(i64::from))
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         .unwrap_or(0)
 }
 pub(crate) fn float(v: &Value) -> f64 {
     v.as_f64()
+        .or_else(|| v.as_bool().map(|b| if b { 1.0 } else { 0.0 }))
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         .filter(|n| n.is_finite())
         .unwrap_or(0.0)
@@ -49,16 +51,46 @@ macro_rules! numeric_enum {
 numeric_enum!(DeviceRole, Shared, Owner = 1, Shared = 2);
 numeric_enum!(CatGender, Unknown, Unknown = 0, Male = 1, Female = 2);
 numeric_enum!(RecordType, Other, CatVisit = 1, CleanCycle = 2, Other = 3);
-numeric_enum!(
-    OperatingState,
-    Unknown,
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(from = "i64", into = "i64")]
+pub enum OperatingState {
     Unknown = -1,
     Idle = 0,
     Restoring = 1,
     Cleaning = 2,
     Leveling = 3,
-    CatAppears = 5
-);
+    CatAppears = 5,
+}
+pub(crate) static WARNED_CODES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<i64>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+impl From<OperatingState> for i64 {
+    fn from(value: OperatingState) -> Self {
+        value as i64
+    }
+}
+impl From<i64> for OperatingState {
+    fn from(value: i64) -> Self {
+        match value {
+            -1 => Self::Unknown,
+            0 => Self::Idle,
+            1 => Self::Restoring,
+            2 => Self::Cleaning,
+            3 => Self::Leveling,
+            5 => Self::CatAppears,
+            value => {
+                if WARNED_CODES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(value)
+                {
+                    log::warn!("unknown operating state: {value}");
+                }
+                Self::Unknown
+            }
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WeightUnit {
     #[serde(rename = "kg")]
@@ -76,7 +108,7 @@ impl WeightUnit {
 }
 
 /// Contains authentication material; Debug is intentionally redacted.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct UserInfo {
     pub user_id: i64,
     pub user_name: String,
@@ -98,7 +130,7 @@ impl UserInfo {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct LoginResult {
     pub user_id: String,
     pub user_token: String,
@@ -118,24 +150,17 @@ impl std::fmt::Debug for LoginResult {
 }
 impl LoginResult {
     pub fn from_api(v: &Value) -> Result<Self> {
-        let plain =
-            auth::decrypt_login_token(v["loginToken"].as_str().ok_or(Error::InvalidResponse)?)?;
-        let parts: Vec<_> = plain.split('@').collect();
-        // The live service appends metadata after the four authentication fields.
-        // Match Python's parser by ignoring those trailing fields.
-        if parts.len() < 4 {
-            return Err(Error::InvalidResponse);
-        }
+        let parts = Self::parse_login_token(v["loginToken"].as_str().unwrap_or(""))?;
         let user_info = UserInfo::from_api(&v["userInfo"]);
         Ok(Self {
             user_id: if user_info.ali_user_id != 0 {
                 user_info.ali_user_id.to_string()
             } else {
-                parts[1].into()
+                parts[1].clone()
             },
-            user_token: parts[0].into(),
-            aes_key: parts[2].into(),
-            aes_iv: parts[3].into(),
+            user_token: parts[0].clone(),
+            aes_key: parts[2].clone(),
+            aes_iv: parts[3].clone(),
             user_info,
             issued_at: auth::now_ms() as f64 / 1000.0,
             iot_token: String::new(),
@@ -148,7 +173,19 @@ impl LoginResult {
         self
     }
     pub fn age_seconds(&self) -> f64 {
-        auth::now_ms() as f64 / 1000.0 - self.issued_at
+        self.age_seconds_at(auth::now_ms() as f64 / 1000.0)
+    }
+    pub fn age_seconds_at(&self, now: f64) -> f64 {
+        now - self.issued_at
+    }
+    pub fn parse_login_token(token: &str) -> Result<[String; 4]> {
+        let plain = if token.is_empty() {
+            String::new()
+        } else {
+            auth::decrypt_login_token(token)?
+        };
+        let mut parts = plain.split('@');
+        Ok(std::array::from_fn(|_| parts.next().unwrap_or("").into()))
     }
 }
 
@@ -166,6 +203,9 @@ pub struct Device {
     pub bind_time: i64,
 }
 impl Device {
+    pub fn list_from_response(v: &Value) -> Vec<Self> {
+        object_list(&v["data"]).map(Self::from_api).collect()
+    }
     pub fn from_api(v: &Value) -> Self {
         Self {
             iot_id: string(&v["iotId"]),
@@ -200,6 +240,9 @@ pub struct Cat {
     pub path: String,
 }
 impl Cat {
+    pub fn list_from_response(v: &Value) -> Vec<Self> {
+        object_list(v).map(Self::from_api).collect()
+    }
     pub fn from_api(v: &Value) -> Self {
         Self {
             id: int(&v["id"]),
@@ -238,6 +281,11 @@ pub struct ToiletRecord {
     pub way: i64,
 }
 impl ToiletRecord {
+    pub fn list_from_response(v: &Value) -> Vec<Self> {
+        object_list(v.get("record_list").unwrap_or(&Value::Null))
+            .map(Self::from_api)
+            .collect()
+    }
     pub fn from_api(v: &Value) -> Self {
         Self {
             record_id: int(&v["record_id"]),
@@ -264,6 +312,9 @@ pub struct DailyStatistics {
     pub weight_avg: f64,
 }
 impl DailyStatistics {
+    pub fn list_from_response(v: &Value) -> Vec<Self> {
+        object_list(v).map(Self::from_api).collect()
+    }
     pub fn from_api(v: &Value) -> Self {
         Self {
             date: string(&v["date"]),
@@ -274,6 +325,13 @@ impl DailyStatistics {
             weight_avg: float(&v["weight_avg"]),
         }
     }
+}
+
+fn object_list(v: &Value) -> impl Iterator<Item = &Value> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.is_object())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

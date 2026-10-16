@@ -73,6 +73,21 @@ impl NeakasaClient {
     pub(crate) fn require_session(&self) -> Result<&LoginResult> {
         self.login.as_ref().ok_or(Error::NotAuthenticated)
     }
+    pub(crate) fn require_iot_session(&self) -> Result<&str> {
+        let token = &self.require_session()?.iot_token;
+        if token.is_empty() {
+            Err(Error::NotAuthenticated)
+        } else {
+            Ok(token)
+        }
+    }
+    pub fn status_stream(&self, options: crate::StreamOptions) -> Result<crate::StatusStream> {
+        crate::StatusStream::new(
+            self.transport.clone(),
+            self.require_session()?.clone(),
+            options,
+        )
+    }
     /// None forces a fresh login; Some resumes and bootstraps IoT only if missing.
     pub async fn login(&mut self, cached: Option<LoginResult>) -> Result<LoginResult> {
         self.login = cached;
@@ -84,7 +99,7 @@ impl NeakasaClient {
         }
         Ok(self.require_session()?.clone())
     }
-    async fn login_rest(&mut self) -> Result<()> {
+    pub(crate) async fn login_rest(&mut self) -> Result<()> {
         if self.email.is_empty() || self.password.is_empty() {
             return Err(Error::InvalidInput("saved credentials unavailable"));
         }
@@ -102,7 +117,7 @@ impl NeakasaClient {
         self.login = Some(LoginResult::from_api(&unwrap_rest(result)?)?);
         Ok(())
     }
-    async fn authenticate_aliyun(&mut self) -> Result<()> {
+    pub(crate) async fn authenticate_aliyun(&mut self) -> Result<()> {
         let auth_code = self
             .require_session()?
             .user_info
@@ -124,14 +139,15 @@ impl NeakasaClient {
                 )
                 .await?,
         )?;
-        let oa = nonempty(&region["oaApiGatewayEndpoint"])?;
-        let gateway = nonempty(&region["apiGatewayEndpoint"])?;
+        let oa = nonempty(&region["oaApiGatewayEndpoint"]).map_err(|_| Error::Api(-1))?;
+        let gateway = nonempty(&region["apiGatewayEndpoint"]).map_err(|_| Error::Api(-1))?;
         let connect=self.transport.oa(&oa,"/api/prd/connect.json",json!({"request":{"context":{"appKey":APP_KEY},"config":{"version":0,"lastModify":0},"device":{}}}),None).await?;
-        check_oa(&connect)?;
-        let vid = nonempty(&connect["data"]["vid"])?;
+        check_oa(&connect).map_err(|_| Error::Api(-1))?;
+        let vid = nonempty(&connect["data"]["vid"]).map_err(|_| Error::Api(-1))?;
         let login=self.transport.oa(&oa,"/api/prd/loginbyoauth.json",json!({"loginByOauthRequest":{"authCode":auth_code,"oauthPlateform":23,"oauthAppKey":APP_KEY,"riskControlInfo":{}}}),Some(&vid)).await?;
         check_oa(&login)?;
-        let sid = nonempty(&login["data"]["data"]["loginSuccessResult"]["sid"])?;
+        let sid = nonempty(&login["data"]["data"]["loginSuccessResult"]["sid"])
+            .map_err(|_| Error::Authentication(-1))?;
         let result = unwrap_iot(
             self.transport
                 .iot(
@@ -143,26 +159,25 @@ impl NeakasaClient {
                     &language,
                 )
                 .await?,
-        )?;
-        let token = nonempty(&result["iotToken"])?;
+        )
+        .map_err(|e| Error::Authentication(e.code().unwrap_or(-1)))?;
+        let token = nonempty(&result["iotToken"]).map_err(|_| Error::Authentication(-1))?;
         let session = self.login.as_mut().ok_or(Error::NotAuthenticated)?;
         session.iot_token = token;
         session.iot_host = gateway;
         Ok(())
     }
-    async fn refresh_iot(&mut self) -> Result<()> {
+    pub(crate) async fn refresh_iot(&mut self) -> Result<()> {
         if self.authenticate_aliyun().await.is_err() {
             self.login_rest().await?;
             self.authenticate_aliyun().await?;
         }
         Ok(())
     }
-    async fn iot(&mut self, path: &str, version: &str, payload: Value) -> Result<Value> {
+    pub(crate) async fn iot(&mut self, path: &str, version: &str, payload: Value) -> Result<Value> {
         for attempt in 0..2 {
             let session = self.require_session()?;
-            if session.iot_token.is_empty() {
-                return Err(Error::NotAuthenticated);
-            }
+            self.require_iot_session()?;
             let result = unwrap_iot(
                 self.transport
                     .iot(
@@ -183,7 +198,11 @@ impl NeakasaClient {
         }
         Err(Error::SessionExpired(401))
     }
-    async fn rest_get(&self, path: &str, mut params: Vec<(String, String)>) -> Result<Value> {
+    pub(crate) async fn rest_get(
+        &self,
+        path: &str,
+        mut params: Vec<(String, String)>,
+    ) -> Result<Value> {
         let session = self.require_session()?;
         params.push(("user_id".into(), session.user_id.clone()));
         unwrap_rest(
@@ -229,7 +248,7 @@ impl NeakasaClient {
             .collect();
         Ok(devices)
     }
-    async fn resolve(&mut self, name: &str) -> Result<Device> {
+    pub(crate) async fn resolve(&mut self, name: &str) -> Result<Device> {
         self.require_session()?;
         if !self.devices.contains_key(name) {
             self.list_devices().await?;
@@ -239,7 +258,7 @@ impl NeakasaClient {
             .cloned()
             .ok_or(Error::InvalidInput("device not registered"))
     }
-    async fn rest_params(&mut self, name: &str) -> Result<Vec<(String, String)>> {
+    pub(crate) async fn rest_params(&mut self, name: &str) -> Result<Vec<(String, String)>> {
         let device = self.resolve(name).await?;
         Ok(vec![
             ("device_name".into(), name.into()),
@@ -385,7 +404,7 @@ impl NeakasaClient {
         self.property(name, "childLockOnOff", json!(i32::from(enabled)))
             .await
     }
-    pub async fn calibrate_sand(&mut self, name: &str, percent: u8) -> Result<()> {
+    pub async fn calibrate_sand(&mut self, name: &str, percent: i64) -> Result<()> {
         if !(1..=100).contains(&percent) {
             return Err(Error::InvalidInput("percent must be in 1..100"));
         }
